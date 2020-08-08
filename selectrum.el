@@ -615,7 +615,29 @@ PRED defaults to `minibuffer-completion-predicate'."
       ('current/matches (format "%-6s " (format "%d/%d" current total)))
       (_                ""))))
 
+(defvar-local selectrum--dynamic nil)
 (defun selectrum--minibuffer-post-command-hook ()
+  (if selectrum--init-p
+      (selectrum--minibuffer-post-command-hook-1)
+    (if (and (functionp minibuffer-completion-table)
+             (not selectrum--dynamic)
+             ;; TODO: AND not known to be static...
+             (not (equal
+                   (selectrum-get-current-input)
+                   selectrum--previous-input-string)))
+        (progn
+          (setq selectrum--preprocessed-candidates
+                (lambda (_input)
+                  (let ((res (while-no-input
+                               (selectrum--get-candidates-from-table))))
+                    (if (eq res t)
+                        selectrum--refined-candidates
+                      res))))
+          (run-with-idle-timer .2 nil #'selectrum--minibuffer-post-command-hook-1))
+      ;; recomputation automatically skipped when input is equal...
+      (selectrum--minibuffer-post-command-hook-1))))
+
+(defun selectrum--minibuffer-post-command-hook-1 ()
   "Update minibuffer in response to user input."
   ;; Stay within input area.
   (goto-char (max (point) selectrum--start-of-input-marker))
@@ -634,8 +656,6 @@ PRED defaults to `minibuffer-completion-predicate'."
     (unless (equal input selectrum--previous-input-string)
       (when (and (not selectrum--preprocessed-candidates)
                  minibuffer-completion-table)
-        ;; No candidates were passed, initialize them from
-        ;; `minibuffer-completion-table'.
         (setq selectrum--preprocessed-candidates
               (funcall selectrum-preprocess-candidates-function
                        (selectrum--get-candidates-from-table))))
@@ -808,9 +828,12 @@ currently displayed candidates."
       ;; Adjust if needed.
       (when (or selectrum--init-p
                 (and selectrum--current-candidate-index
-                     ;; Allow size change when navigating, not while
-                     ;; typing.
-                     (/= first highlighted)
+                     (or ;; Allow size change when navigating, not while
+                      ;; typing.
+                      (/= first highlighted)
+                      ;; Except for dynamic completion table...
+                      (and (functionp minibuffer-completion-table)
+                           (not selectrum--dynamic)))
                      ;; Don't allow shrinking.
                      (= (length cands)
                         selectrum-num-candidates-displayed)))
@@ -1005,7 +1028,9 @@ into the user input area to start with."
     (setq-local selectrum-preprocess-candidates-function sortf))
   (setq selectrum--preprocessed-candidates
         (if (functionp candidates)
-            candidates
+            (progn
+              (setq selectrum--dynamic t)
+              candidates)
           (funcall selectrum-preprocess-candidates-function candidates)))
   (setq selectrum--default-candidate default-candidate)
   ;; Make sure to trigger an "user input changed" event, so that
