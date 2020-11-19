@@ -780,6 +780,42 @@ greather than the window height."
        (>= (cdr (window-text-pixel-size window))
            (window-body-height window 'pixelwise))))
 
+(defun selectrum--setup-candidates-buffer (window cands index input)
+  (let* ((ncands (if (and selectrum-display-action
+                          (windowp window))
+                     (max (window-body-height window)
+                          selectrum-num-candidates-displayed)
+                   selectrum-num-candidates-displayed))
+         (first-index-displayed
+          ;; Save for selection of cands by numeric args.
+          (setq selectrum--first-index-displayed
+                (if index
+                    (selectrum--clamp
+                     ;; Adding one here makes it look slightly better, as
+                     ;; there are guaranteed to be more candidates shown
+                     ;; below the selection than above.
+                     (1+ (- index
+                            (max 1 (/ ncands 2))))
+                     0
+                     (max (- (length cands)
+                             ncands)
+                          0))
+                  0)))
+         (highlighted-index (and index
+                                 (- index
+                                    first-index-displayed)))
+         (displayed-candidates
+          (seq-take
+           (nthcdr
+            first-index-displayed
+            cands)
+           ncands)))
+    (insert
+     (selectrum--candidates-display-string
+      (funcall selectrum-highlight-candidates-function
+               input displayed-candidates)
+      highlighted-index))))
+
 (defun selectrum--minibuffer-post-command-hook ()
   "Update minibuffer in response to user input."
   (unless selectrum--skip-updates-p
@@ -883,44 +919,21 @@ greather than the window height."
                          (and selectrum--refined-candidates
                               (selectrum--get-display-window))
                        (active-minibuffer-window)))
-             (ncands (if (and selectrum-display-action
-                              (windowp window))
-                         (max (window-body-height window)
-                              selectrum-num-candidates-displayed)
-                       selectrum-num-candidates-displayed))
-             (first-index-displayed
-              ;; Save for selection of cands by numeric args.
-              (setq selectrum--first-index-displayed
-                    (if selectrum--current-candidate-index
-                        (selectrum--clamp
-                         ;; Adding one here makes it look slightly better, as
-                         ;; there are guaranteed to be more candidates shown
-                         ;; below the selection than above.
-                         (1+ (- selectrum--current-candidate-index
-                                (max 1 (/ ncands 2))))
-                         0
-                         (max (- (length selectrum--refined-candidates)
-                                 ncands)
-                              0))
-                      0)))
-             (highlighted-index (and selectrum--current-candidate-index
-                                     (- selectrum--current-candidate-index
-                                        first-index-displayed)))
-             (displayed-candidates
-              (seq-take
-               (nthcdr
-                first-index-displayed
-                selectrum--refined-candidates)
-               ncands))
-             (candidate-string (selectrum--candidates-display-string
-                                displayed-candidates
-                                input
-                                highlighted-index))
+             (buffer (with-current-buffer
+                         (get-buffer-create selectrum--candidates-buffer)
+                       (erase-buffer)
+                       (selectrum--setup-candidates-buffer
+                        window
+                        selectrum--refined-candidates
+                        selectrum--current-candidate-index
+                        input)
+                       (current-buffer)))
+             (candidate-string (with-current-buffer buffer (buffer-string)))
              (default
-               (if (or (and highlighted-index
-                            (< highlighted-index 0))
+               (if (or (and selectrum--current-candidate-index
+                            (< selectrum--current-candidate-index 0))
                        (and (not selectrum--match-required-p)
-                            (not displayed-candidates))
+                            (not selectrum--refined-candidates))
                        (and selectrum--default-candidate
                             (not minibuffer-completing-file-name)
                             (not (member selectrum--default-candidate
@@ -942,8 +955,8 @@ greather than the window height."
                                     'selectrum-current-candidate
                                   'minibuffer-prompt))
                                (propertize "]" 'face 'minibuffer-prompt))
-                     (when (and highlighted-index
-                                (< highlighted-index 0))
+                     (when (and selectrum--current-candidate-index
+                                (< selectrum--current-candidate-index 0))
                        (prog1 nil
                          (add-text-properties
                           (minibuffer-prompt-end) bound
@@ -1078,7 +1091,6 @@ The specific details of the formatting are determined by
        single/lines))))
 
 (defun selectrum--candidates-display-string (candidates
-                                             input
                                              highlighted-index)
   "Get display string for CANDIDATES.
 INPUT is the current user input. CANDIDATES are the candidates
@@ -1087,14 +1099,7 @@ and FIRST-INDEX-DISPLAYED is the index of the top most
 candidate."
   (let ((index 0)
         (lines
-         (selectrum--ensure-single-lines
-          ;; First pass the candidates to the highlight function
-          ;; before stripping multi-lines because it might expect
-          ;; getting passed the same candidates as were passed
-          ;; to the filter function (for example `orderless'
-          ;; requires this).
-          (funcall selectrum-highlight-candidates-function
-                   input candidates))))
+         (selectrum--ensure-single-lines candidates)))
     (with-temp-buffer
       (dolist (candidate lines)
         (let ((displayed-candidate
