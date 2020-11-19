@@ -781,6 +781,10 @@ greather than the window height."
            (window-body-height window 'pixelwise))))
 
 (defun selectrum--setup-candidates-buffer (window cands index input)
+  "Format current buffer displayed in WINDOW.
+CANDS are all filtered candidates available for display. INDEX is
+the index of the currently selected candidates and INPUT the
+current user input that was used for filtering."
   (let* ((ncands (if (and selectrum-display-action
                           (windowp window))
                      (max (window-body-height window)
