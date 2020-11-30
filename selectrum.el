@@ -37,6 +37,10 @@
 
 ;;;; Libraries
 
+(setq selectrum-display-action '(display-buffer-in-side-window
+                                     (side . bottom)
+                                     (slot . -1)))
+
 (require 'cl-lib)
 (require 'crm)
 (require 'map)
@@ -813,12 +817,22 @@ current user input that was used for filtering."
            (nthcdr
             first-index-displayed
             cands)
-           ncands)))
-    (insert
-     (selectrum--candidates-display-string
-      (funcall selectrum-highlight-candidates-function
-               input displayed-candidates)
-      highlighted-index))))
+           ncands))
+         (hcands (funcall selectrum-highlight-candidates-function
+                          input displayed-candidates))
+         (str (selectrum--candidates-display-string
+               hcands
+               highlighted-index)))
+    (when (< (length displayed-candidates)
+             (window-body-height window))
+      (insert (make-string
+               (- (window-body-height window)
+                  (length displayed-candidates))
+               ?\n)))
+    (insert (mapconcat #'identity
+                       (nreverse (split-string str "\n" t)) "\n"))
+    (fit-window-to-buffer window)))
+
 
 (defun selectrum--minibuffer-post-command-hook ()
   "Update minibuffer in response to user input."
