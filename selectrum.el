@@ -933,9 +933,13 @@ current user input that was used for filtering."
                         input)
                        (current-buffer)))
              (candidate-string (with-current-buffer buffer (buffer-string)))
+             (highlighted-index
+              (and selectrum--current-candidate-index
+                   (- selectrum--current-candidate-index
+                      selectrum--first-index-displayed)))
              (default
-               (if (or (and selectrum--current-candidate-index
-                            (< selectrum--current-candidate-index 0))
+               (if (or (and highlighted-index
+                            (< highlighted-index 0))
                        (and (not selectrum--match-required-p)
                             (not selectrum--refined-candidates))
                        (and selectrum--default-candidate
