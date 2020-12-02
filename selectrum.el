@@ -780,45 +780,29 @@ greather than the window height."
        (>= (cdr (window-text-pixel-size window))
            (window-body-height window 'pixelwise))))
 
-(defun selectrum--setup-candidates-buffer (window cands index cb)
-  "Insert candidates into current buffer.
-Buffer will be displayed in WINDOW. CANDS are the filtered
-candidates available for display. INDEX is the index of the
-currently selected candidate. CB is the callback to use for
-candidates which are inserted into the buffer which takes care of
-the match highlighting. Should return the index of the first
-displayed candidate."
-  (let* ((ncands (if (and selectrum-display-action
-                          (windowp window))
-                     (max (window-body-height window)
-                          selectrum-num-candidates-displayed)
-                   selectrum-num-candidates-displayed))
-         (first-index-displayed
-          (if index
-              (selectrum--clamp
-               ;; Adding one here makes it look slightly better, as
-               ;; there are guaranteed to be more candidates shown
-               ;; below the selection than above.
-               (1+ (- index
-                      (max 1 (/ ncands 2))))
-               0
-               (max (- (length cands)
-                       ncands)
-                    0))
-            0))
-         (highlighted-index (and index (- index first-index-displayed)))
+(defun selectrum--setup-candidates-buffer (index nlines ncols cb)
+  "Insert candidates into current buffer as they should be displayed.
+INDEX is the index of the currently selected candidate and NLINES
+the number of lines available and NCOLS the number of columns.
+Callback CB returns the candidates, it receives three arguments,
+the index position, the index of the highlighted candidate and
+the number of candidates you would like to get."
+  (ignore ncols)
+  (let* ((first-index-displayed
+          (selectrum--clamp
+           ;; Adding one here makes it look slightly better, as
+           ;; there are guaranteed to be more candidates shown
+           ;; below the selection than above.
+           (1+ (- index (max 1 (/ nlines 2))))
+           0
+           (max (- (length selectrum--refined-candidates)
+                   nlines)
+                0)))
+         (highlighted-index (- index first-index-displayed))
          (displayed-candidates
-          (seq-take
-           (nthcdr
-            first-index-displayed
-            cands)
-           ncands))
-         (hcands (funcall cb displayed-candidates))
-         (str (selectrum--candidates-display-string
-               hcands
-               highlighted-index)))
-    (prog1 first-index-displayed
-      (insert str))))
+          (funcall cb first-index-displayed highlighted-index nlines)))
+    (dolist (cand displayed-candidates)
+      (insert cand "\n"))))
 
 (defun selectrum--minibuffer-post-command-hook ()
   "Update minibuffer in response to user input."
@@ -926,14 +910,25 @@ displayed candidate."
              (buffer (with-current-buffer
                          (get-buffer-create selectrum--candidates-buffer)
                        (erase-buffer)
-                       (setq selectrum--first-index-displayed
-                             (selectrum--setup-candidates-buffer
-                              window
-                              selectrum--refined-candidates
-                              selectrum--current-candidate-index
-                              (lambda (cands)
-                                (funcall selectrum-highlight-candidates-function
-                                         input cands))))
+                       (selectrum--setup-candidates-buffer
+                        (or selectrum--current-candidate-index 0)
+                        (if (and selectrum-display-action
+                                 (windowp window))
+                            (max (window-body-height window)
+                                 selectrum-num-candidates-displayed)
+                          selectrum-num-candidates-displayed)
+                        (window-width window)
+                        (lambda (first-index-displayed highlighted-index ncands)
+                          (setq selectrum--first-index-displayed
+                                first-index-displayed)
+                          (selectrum--display-candidates
+                           (funcall selectrum-highlight-candidates-function
+                                    input
+                                    (seq-take
+                                     (nthcdr
+                                      first-index-displayed
+                                      selectrum--refined-candidates)
+                                     ncands)) highlighted-index)))
                        (current-buffer)))
              (candidate-string (unless selectrum-display-action
                                  (with-current-buffer buffer
@@ -1095,117 +1090,118 @@ The specific details of the formatting are determined by
          cand)
        single/lines))))
 
-(defun selectrum--candidates-display-string (candidates
-                                             highlighted-index)
-  "Get display string for CANDIDATES.
+(defun selectrum--display-candidates (candidates highlighted-index)
+  "Get CANDIDATES for display.
 INPUT is the current user input. CANDIDATES are the candidates
 for display. HIGHLIGHTED-INDEX is the currently selected index."
-  (let ((index 0)
-        (lines
-         (selectrum--ensure-single-lines candidates)))
-    (with-temp-buffer
-      (dolist (candidate lines)
-        (let ((displayed-candidate
-               (concat
-                (get-text-property
-                 0 'selectrum-candidate-display-prefix
-                 candidate)
-                candidate
-                (get-text-property
-                 0 'selectrum-candidate-display-suffix
-                 candidate)))
-              (right-margin (get-text-property
-                             0 'selectrum-candidate-display-right-margin
-                             candidate))
-              (formatting-current-candidate
-               (equal index highlighted-index)))
-          ;; Add the ability to interact with candidates via the mouse.
-          (add-text-properties
-           0 (length displayed-candidate)
-           (list
-            'mouse-face 'highlight
-            'help-echo
-            "mouse-1: select candidate\nmouse-3: insert candidate"
-            'keymap
-            (let ((keymap (make-sparse-keymap)))
-              (define-key keymap [mouse-1]
-                `(lambda ()
-                   (interactive)
-                   (selectrum-select-current-candidate ,(1+ index))))
-              (define-key keymap [mouse-3]
-                `(lambda ()
-                   (interactive)
-                   (selectrum-insert-current-candidate ,(1+ index))))
-              keymap))
-           displayed-candidate)
-          (when formatting-current-candidate
-            (setq displayed-candidate
-                  (copy-sequence displayed-candidate))
-            ;; Avoid trampling highlighting done by
-            ;; `selectrum-highlight-candidates-function'. In
-            ;; Emacs<27 `add-face-text-property' has a bug but
-            ;; in Emacs>=27 `font-lock-prepend-text-property'
-            ;; doesn't work. Even though these functions are
-            ;; both supposed to do the same thing.
-            ;;
-            ;; Anyway, no need to clean up the text properties
-            ;; afterwards, as an update will cause all these
-            ;; strings to be thrown away and re-generated from
-            ;; scratch.
-            ;;
-            ;; See:
-            ;; <https://github.com/raxod502/selectrum/issues/21>
-            ;; <https://github.com/raxod502/selectrum/issues/58>
-            ;; <https://github.com/raxod502/selectrum/pull/76>
-            (if (version< emacs-version "27")
-                (font-lock-prepend-text-property
+  (let* ((index 0)
+         (lines
+          (selectrum--ensure-single-lines candidates))
+         (str
+          (with-temp-buffer
+            (dolist (candidate lines)
+              (let ((displayed-candidate
+                     (concat
+                      (get-text-property
+                       0 'selectrum-candidate-display-prefix
+                       candidate)
+                      candidate
+                      (get-text-property
+                       0 'selectrum-candidate-display-suffix
+                       candidate)))
+                    (right-margin (get-text-property
+                                   0 'selectrum-candidate-display-right-margin
+                                   candidate))
+                    (formatting-current-candidate
+                     (equal index highlighted-index)))
+                ;; Add the ability to interact with candidates via the mouse.
+                (add-text-properties
                  0 (length displayed-candidate)
-                 'face 'selectrum-current-candidate displayed-candidate)
-              (add-face-text-property
-               0 (length displayed-candidate)
-               'selectrum-current-candidate
-               'append displayed-candidate)))
-          (insert "\n")
-          (when selectrum-show-indices
-            (let* ((display-fn (if (functionp selectrum-show-indices)
-                                   selectrum-show-indices
-                                 (lambda (i) (format "%2d " i))))
-                   (curr-index (substring-no-properties
-                                (funcall display-fn (1+ index)))))
-              (insert
-               (propertize curr-index 'face 'minibuffer-prompt))))
-          (insert displayed-candidate)
-          (cond
-           (right-margin
-            (insert
-             (concat
-              (propertize
-               " "
-               'face
-               (when formatting-current-candidate
-                 'selectrum-current-candidate)
-               'display
-               `(space :align-to (- right-fringe
-                                    ,(string-width right-margin)
-                                    selectrum-right-margin-padding)))
-              (propertize right-margin
-                          'face
-                          (when formatting-current-candidate
-                            'selectrum-current-candidate)))))
-           ((and selectrum-extend-current-candidate-highlight
-                 formatting-current-candidate)
-            (insert
-             (propertize
-              " "
-              'face 'selectrum-current-candidate
-              'display
-              `(space :align-to (- right-fringe
-                                   selectrum-right-margin-padding)))))))
-        (cl-incf index))
-      (goto-char (point-min))
-      ;; Skip initial newline.
-      (unless (eobp) (forward-line 1))
-      (buffer-substring (point) (point-max)))))
+                 (list
+                  'mouse-face 'highlight
+                  'help-echo
+                  "mouse-1: select candidate\nmouse-3: insert candidate"
+                  'keymap
+                  (let ((keymap (make-sparse-keymap)))
+                    (define-key keymap [mouse-1]
+                      `(lambda ()
+                         (interactive)
+                         (selectrum-select-current-candidate ,(1+ index))))
+                    (define-key keymap [mouse-3]
+                      `(lambda ()
+                         (interactive)
+                         (selectrum-insert-current-candidate ,(1+ index))))
+                    keymap))
+                 displayed-candidate)
+                (when formatting-current-candidate
+                  (setq displayed-candidate
+                        (copy-sequence displayed-candidate))
+                  ;; Avoid trampling highlighting done by
+                  ;; `selectrum-highlight-candidates-function'. In
+                  ;; Emacs<27 `add-face-text-property' has a bug but
+                  ;; in Emacs>=27 `font-lock-prepend-text-property'
+                  ;; doesn't work. Even though these functions are
+                  ;; both supposed to do the same thing.
+                  ;;
+                  ;; Anyway, no need to clean up the text properties
+                  ;; afterwards, as an update will cause all these
+                  ;; strings to be thrown away and re-generated from
+                  ;; scratch.
+                  ;;
+                  ;; See:
+                  ;; <https://github.com/raxod502/selectrum/issues/21>
+                  ;; <https://github.com/raxod502/selectrum/issues/58>
+                  ;; <https://github.com/raxod502/selectrum/pull/76>
+                  (if (version< emacs-version "27")
+                      (font-lock-prepend-text-property
+                       0 (length displayed-candidate)
+                       'face 'selectrum-current-candidate displayed-candidate)
+                    (add-face-text-property
+                     0 (length displayed-candidate)
+                     'selectrum-current-candidate
+                     'append displayed-candidate)))
+                (insert "\n")
+                (when selectrum-show-indices
+                  (let* ((display-fn (if (functionp selectrum-show-indices)
+                                         selectrum-show-indices
+                                       (lambda (i) (format "%2d " i))))
+                         (curr-index (substring-no-properties
+                                      (funcall display-fn (1+ index)))))
+                    (insert
+                     (propertize curr-index 'face 'minibuffer-prompt))))
+                (insert displayed-candidate)
+                (cond
+                 (right-margin
+                  (insert
+                   (concat
+                    (propertize
+                     " "
+                     'face
+                     (when formatting-current-candidate
+                       'selectrum-current-candidate)
+                     'display
+                     `(space :align-to (- right-fringe
+                                          ,(string-width right-margin)
+                                          selectrum-right-margin-padding)))
+                    (propertize right-margin
+                                'face
+                                (when formatting-current-candidate
+                                  'selectrum-current-candidate)))))
+                 ((and selectrum-extend-current-candidate-highlight
+                       formatting-current-candidate)
+                  (insert
+                   (propertize
+                    " "
+                    'face 'selectrum-current-candidate
+                    'display
+                    `(space :align-to (- right-fringe
+                                         selectrum-right-margin-padding)))))))
+              (cl-incf index))
+            (goto-char (point-min))
+            ;; Skip initial newline.
+            (unless (eobp) (forward-line 1))
+            (buffer-substring (point) (point-max)))))
+    (split-string str "\n" t)))
 
 (defun selectrum--minibuffer-exit-hook ()
   "Clean up Selectrum from the minibuffer, and self-destruct this hook."
