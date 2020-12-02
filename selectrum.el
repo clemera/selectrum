@@ -37,9 +37,27 @@
 
 ;;;; Libraries
 
+
+
+(setq selectrum-display-action '(selectrum-display-full-frame))
+
+(defun display-buffer-show-in-posframe (buffer _alist)
+  (frame-root-window
+   (posframe-show buffer
+                  :min-height 10
+                  :min-width (frame-width)
+                  :internal-border-width 1
+                  :left-fringe 8
+                  :right-fringe 8
+                  :poshandler 'posframe-poshandler-frame-bottom-left-corner)))
+
+
+(setq selectrum-display-action '(display-buffer-show-in-posframe))
+
 (setq selectrum-display-action '(display-buffer-in-side-window
                                      (side . bottom)
                                      (slot . -1)))
+
 
 (require 'cl-lib)
 (require 'crm)
