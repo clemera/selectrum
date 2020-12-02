@@ -1099,9 +1099,7 @@ The specific details of the formatting are determined by
                                              highlighted-index)
   "Get display string for CANDIDATES.
 INPUT is the current user input. CANDIDATES are the candidates
-for display. HIGHLIGHTED-INDEX is the currently selected index
-and FIRST-INDEX-DISPLAYED is the index of the top most
-candidate."
+for display. HIGHLIGHTED-INDEX is the currently selected index."
   (let ((index 0)
         (lines
          (selectrum--ensure-single-lines candidates)))
