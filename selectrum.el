@@ -776,9 +776,11 @@ greather than the window height."
   "Insert candidates into current buffer as they should be displayed.
 INDEX is the index of the currently selected candidate and NLINES
 the number of lines available and NCOLS the number of columns.
-Callback CB returns the candidates, it receives three arguments,
-the index position, the index of the highlighted candidate and
-the number of candidates you would like to get."
+Callback CB returns the candidates, it receives four arguments,
+the index position, the number of candidates you would like to
+get, the index (relative to those candidates) of the candidate
+which should get highlighted and optionally a flag if no
+annotations should be displayed."
   (ignore ncols)
   (let* ((first-index-displayed
           (selectrum--clamp
@@ -792,7 +794,7 @@ the number of candidates you would like to get."
                 0)))
          (highlighted-index (- index first-index-displayed))
          (displayed-candidates
-          (funcall cb first-index-displayed highlighted-index nlines)))
+          (funcall cb first-index-displayed nlines highlighted-index)))
     (dolist (cand displayed-candidates)
       (insert cand "\n"))))
 
@@ -898,18 +900,21 @@ the number of candidates you would like to get."
                          (and selectrum--refined-candidates
                               (selectrum--get-display-window))
                        (active-minibuffer-window)))
+             (nlines (if (and selectrum-display-action
+                              (windowp window))
+                         (max (window-body-height window)
+                              selectrum-num-candidates-displayed)
+                       selectrum-num-candidates-displayed))
+             (ncols (window-width window))
              (buffer (with-current-buffer
                          (get-buffer-create selectrum--candidates-buffer)
                        (erase-buffer)
                        (selectrum--setup-candidates-buffer
                         (or selectrum--current-candidate-index 0)
-                        (if (and selectrum-display-action
-                                 (windowp window))
-                            (max (window-body-height window)
-                                 selectrum-num-candidates-displayed)
-                          selectrum-num-candidates-displayed)
-                        (window-width window)
-                        (lambda (first-index-displayed highlighted-index ncands)
+                        nlines
+                        ncols
+                        (lambda (first-index-displayed ncands highlighted-index
+                                                       &optional no-annotations)
                           (setq selectrum--first-index-displayed
                                 first-index-displayed)
                           (selectrum--display-candidates
@@ -919,7 +924,7 @@ the number of candidates you would like to get."
                                      (nthcdr
                                       first-index-displayed
                                       selectrum--refined-candidates)
-                                     ncands)) highlighted-index)))
+                                     ncands)) highlighted-index no-annotations)))
                        (current-buffer)))
              (candidate-string (unless selectrum-display-action
                                  (with-current-buffer buffer
@@ -1079,7 +1084,8 @@ The specific details of the formatting are determined by
          cand)
        single/lines))))
 
-(defun selectrum--display-candidates (candidates highlighted-index)
+(defun selectrum--display-candidates (candidates highlighted-index
+                                                 &optional no-annotations)
   "Get CANDIDATES for display.
 INPUT is the current user input. CANDIDATES are the candidates
 for display. HIGHLIGHTED-INDEX is the currently selected index."
@@ -1090,17 +1096,20 @@ for display. HIGHLIGHTED-INDEX is the currently selected index."
           (with-temp-buffer
             (dolist (candidate lines)
               (let ((displayed-candidate
-                     (concat
-                      (get-text-property
-                       0 'selectrum-candidate-display-prefix
-                       candidate)
-                      candidate
-                      (get-text-property
-                       0 'selectrum-candidate-display-suffix
-                       candidate)))
-                    (right-margin (get-text-property
-                                   0 'selectrum-candidate-display-right-margin
-                                   candidate))
+                     (if no-annotations
+                         candidate
+                       (concat
+                        (get-text-property
+                         0 'selectrum-candidate-display-prefix
+                         candidate)
+                        candidate
+                        (get-text-property
+                         0 'selectrum-candidate-display-suffix
+                         candidate))))
+                    (right-margin (unless no-annotations
+                                    (get-text-property
+                                     0 'selectrum-candidate-display-right-margin
+                                     candidate)))
                     (formatting-current-candidate
                      (equal index highlighted-index)))
                 ;; Add the ability to interact with candidates via the mouse.
