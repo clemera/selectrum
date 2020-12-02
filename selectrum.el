@@ -37,28 +37,6 @@
 
 ;;;; Libraries
 
-
-
-(setq selectrum-display-action '(selectrum-display-full-frame))
-
-(defun display-buffer-show-in-posframe (buffer _alist)
-  (frame-root-window
-   (posframe-show buffer
-                  :min-height 10
-                  :min-width (frame-width)
-                  :internal-border-width 1
-                  :left-fringe 8
-                  :right-fringe 8
-                  :poshandler 'posframe-poshandler-frame-bottom-left-corner)))
-
-
-(setq selectrum-display-action '(display-buffer-show-in-posframe))
-
-(setq selectrum-display-action '(display-buffer-in-side-window
-                                     (side . bottom)
-                                     (slot . -1)))
-
-
 (require 'cl-lib)
 (require 'crm)
 (require 'map)
@@ -804,31 +782,30 @@ greather than the window height."
 
 (defun selectrum--setup-candidates-buffer (window cands index cb)
   "Insert candidates into current buffer.
-Buffer will be displayed in WINODW. CANDS are the filtered
+Buffer will be displayed in WINDOW. CANDS are the filtered
 candidates available for display. INDEX is the index of the
 currently selected candidate. CB is the callback to use for
 candidates which are inserted into the buffer which takes care of
-the match highlighting."
+the match highlighting. Should return the index of the first
+displayed candidate."
   (let* ((ncands (if (and selectrum-display-action
                           (windowp window))
                      (max (window-body-height window)
                           selectrum-num-candidates-displayed)
                    selectrum-num-candidates-displayed))
          (first-index-displayed
-          ;; Save for selection of cands by numeric args.
-          (setq selectrum--first-index-displayed
-                (if index
-                    (selectrum--clamp
-                     ;; Adding one here makes it look slightly better, as
-                     ;; there are guaranteed to be more candidates shown
-                     ;; below the selection than above.
-                     (1+ (- index
-                            (max 1 (/ ncands 2))))
-                     0
-                     (max (- (length cands)
-                             ncands)
-                          0))
-                  0)))
+          (if index
+              (selectrum--clamp
+               ;; Adding one here makes it look slightly better, as
+               ;; there are guaranteed to be more candidates shown
+               ;; below the selection than above.
+               (1+ (- index
+                      (max 1 (/ ncands 2))))
+               0
+               (max (- (length cands)
+                       ncands)
+                    0))
+            0))
          (highlighted-index (and index (- index first-index-displayed)))
          (displayed-candidates
           (seq-take
@@ -840,18 +817,8 @@ the match highlighting."
          (str (selectrum--candidates-display-string
                hcands
                highlighted-index)))
-    (insert str)
-    ;; (when (< (length displayed-candidates)
-    ;;          (window-body-height window))
-    ;;   ;; Fill empty space
-    ;;   (insert (make-string
-    ;;            (- (window-body-height window)
-    ;;               (length displayed-candidates))
-    ;;            ?\n)))
-    ;; (insert (mapconcat #'identity
-    ;;                    (nreverse (split-string str "\n" t)) "\n"))
-    ))
-
+    (prog1 first-index-displayed
+      (insert str))))
 
 (defun selectrum--minibuffer-post-command-hook ()
   "Update minibuffer in response to user input."
@@ -959,13 +926,14 @@ the match highlighting."
              (buffer (with-current-buffer
                          (get-buffer-create selectrum--candidates-buffer)
                        (erase-buffer)
-                       (selectrum--setup-candidates-buffer
-                        window
-                        selectrum--refined-candidates
-                        selectrum--current-candidate-index
-                        (lambda (cands)
-                          (funcall selectrum-highlight-candidates-function
-                                   input cands)))
+                       (setq selectrum--first-index-displayed
+                             (selectrum--setup-candidates-buffer
+                              window
+                              selectrum--refined-candidates
+                              selectrum--current-candidate-index
+                              (lambda (cands)
+                                (funcall selectrum-highlight-candidates-function
+                                         input cands))))
                        (current-buffer)))
              (candidate-string (unless selectrum-display-action
                                  (with-current-buffer buffer
