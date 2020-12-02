@@ -802,11 +802,13 @@ greather than the window height."
        (>= (cdr (window-text-pixel-size window))
            (window-body-height window 'pixelwise))))
 
-(defun selectrum--setup-candidates-buffer (window cands index input)
-  "Format current buffer displayed in WINDOW.
-CANDS are all filtered candidates available for display. INDEX is
-the index of the currently selected candidates and INPUT the
-current user input that was used for filtering."
+(defun selectrum--setup-candidates-buffer (window cands index cb)
+  "Insert candidates into current buffer.
+Buffer will be displayed in WINODW. CANDS are the filtered
+candidates available for display. INDEX is the index of the
+currently selected candidate. CB is the callback to use for
+candidates which are inserted into the buffer which takes care of
+the match highlighting."
   (let* ((ncands (if (and selectrum-display-action
                           (windowp window))
                      (max (window-body-height window)
@@ -827,29 +829,28 @@ current user input that was used for filtering."
                              ncands)
                           0))
                   0)))
-         (highlighted-index (and index
-                                 (- index
-                                    first-index-displayed)))
+         (highlighted-index (and index (- index first-index-displayed)))
          (displayed-candidates
           (seq-take
            (nthcdr
             first-index-displayed
             cands)
            ncands))
-         (hcands (funcall selectrum-highlight-candidates-function
-                          input displayed-candidates))
+         (hcands (funcall cb displayed-candidates))
          (str (selectrum--candidates-display-string
                hcands
                highlighted-index)))
-    (when (< (length displayed-candidates)
-             (window-body-height window))
-      (insert (make-string
-               (- (window-body-height window)
-                  (length displayed-candidates))
-               ?\n)))
-    (insert (mapconcat #'identity
-                       (nreverse (split-string str "\n" t)) "\n"))
-    (fit-window-to-buffer window)))
+    (insert str)
+    ;; (when (< (length displayed-candidates)
+    ;;          (window-body-height window))
+    ;;   ;; Fill empty space
+    ;;   (insert (make-string
+    ;;            (- (window-body-height window)
+    ;;               (length displayed-candidates))
+    ;;            ?\n)))
+    ;; (insert (mapconcat #'identity
+    ;;                    (nreverse (split-string str "\n" t)) "\n"))
+    ))
 
 
 (defun selectrum--minibuffer-post-command-hook ()
@@ -962,16 +963,16 @@ current user input that was used for filtering."
                         window
                         selectrum--refined-candidates
                         selectrum--current-candidate-index
-                        input)
+                        (lambda (cands)
+                          (funcall selectrum-highlight-candidates-function
+                                   input cands)))
                        (current-buffer)))
-             (candidate-string (with-current-buffer buffer (buffer-string)))
-             (highlighted-index
-              (and selectrum--current-candidate-index
-                   (- selectrum--current-candidate-index
-                      selectrum--first-index-displayed)))
+             (candidate-string (unless selectrum-display-action
+                                 (with-current-buffer buffer
+                                   (buffer-string))))
              (default
-               (if (or (and highlighted-index
-                            (< highlighted-index 0))
+               (if (or (and selectrum--current-candidate-index
+                            (< selectrum--current-candidate-index 0))
                        (and (not selectrum--match-required-p)
                             (not selectrum--refined-candidates))
                        (and selectrum--default-candidate
@@ -995,8 +996,8 @@ current user input that was used for filtering."
                                     'selectrum-current-candidate
                                   'minibuffer-prompt))
                                (propertize "]" 'face 'minibuffer-prompt))
-                     (when (and highlighted-index
-                                (< highlighted-index 0))
+                     (when (and selectrum--current-candidate-index
+                                (< selectrum--current-candidate-index 0))
                        (prog1 nil
                          (add-text-properties
                           (minibuffer-prompt-end) bound
@@ -1006,16 +1007,11 @@ current user input that was used for filtering."
                     (minibuffer-prompt-end) bound
                     '(face selectrum-current-candidate)))))
              (minibuf-after-string (or default " ")))
-        (if selectrum-display-action
-            (with-current-buffer (get-buffer-create
-                                  selectrum--candidates-buffer)
-              (erase-buffer)
-              (insert candidate-string)
-              (goto-char (point-min)))
-          (unless (string-empty-p candidate-string)
-            (setq minibuf-after-string
-                  (concat minibuf-after-string
-                          "\n" candidate-string))))
+        (unless (or selectrum-display-action
+                    (string-empty-p candidate-string))
+          (setq minibuf-after-string
+                (concat minibuf-after-string
+                        "\n" candidate-string)))
         (move-overlay selectrum--candidates-overlay
                       (point-max) (point-max) (current-buffer))
         (put-text-property 0 1 'cursor t minibuf-after-string)
