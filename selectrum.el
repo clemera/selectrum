@@ -805,6 +805,21 @@ LAST-INDEX-DISPLAYED and MINIP see
             (insert  " | ")))))
     n))
 
+(defun selectrum-toggle-display ()
+  (interactive)
+  (setq-local selectrum-insert-candidates-function
+              (if (eq selectrum-insert-candidates-function
+                      #'selectrum-insert-candidates-horizontally)
+                  #'selectrum-insert-candidates-vertically
+                (progn
+                  (setf (window-height) 1)
+                  #'selectrum-insert-candidates-horizontally)))
+  (when (local-variable-p 'selectrum-cleaner)
+    (funcall selectrum-cleaner)
+    (kill-local-variable 'selectrum-cleaner))
+  (selectrum--update-display-window-height (active-minibuffer-window)))
+
+
 (defun selectrum--show-annotation-in-mode-line
     (&optional prefix suffix right-margin)
   "Show PREFIX, SUFFIX and RIGHT-MARGIN annotation in modeline."
@@ -817,11 +832,13 @@ LAST-INDEX-DISPLAYED and MINIP see
              (buf (window-buffer win))
              (mf (buffer-local-value 'mode-line-format buf))
              (cleaner (lambda ()
-                        (when (buffer-live-p buf)
+                        (when (and (buffer-live-p buf)
+                                   (local-variable-p 'selectrum-cleaner))
                           (with-current-buffer buf
                             (setq-local mode-line-format mf))))))
         (with-current-buffer (window-buffer miniw)
-          (unless (memq cleaner minibuffer-exit-hook)
+          (unless (local-variable-p 'selectrum-cleaner)
+            (setq-local selectrum-cleaner cleaner)
             (add-hook 'minibuffer-exit-hook cleaner nil t)))
         (with-current-buffer buf
           (setq-local mode-line-format
