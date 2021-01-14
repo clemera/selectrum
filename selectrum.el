@@ -773,8 +773,10 @@ the update."
             (setq selectrum--total-num-candidates
                   (length selectrum--preprocessed-candidates))))
         (setq selectrum--refined-candidates
-              (funcall selectrum-refine-candidates-function
-                       input selectrum--preprocessed-candidates))
+              (when (or (not minibuffer-history-position)
+                        (zerop minibuffer-history-position))
+                (funcall selectrum-refine-candidates-function
+                         input selectrum--preprocessed-candidates)))
         (when selectrum--move-default-candidate-p
           (setq selectrum--refined-candidates
                 (selectrum--move-to-front-destructive
@@ -803,7 +805,11 @@ the update."
                  ;; Check for candidates needs to be first!
                  ((null selectrum--refined-candidates)
                   (when (or (not selectrum--match-required-p)
-                            (selectrum--at-existing-prompt-path-p))
+                            (selectrum--at-existing-prompt-path-p)
+                            (and minibuffer-history-position
+                                 (not (zerop minibuffer-history-position))
+                                 (member (minibuffer-contents)
+                                         selectrum--preprocessed-candidates)))
                     -1))
                  (keep-selected
                   (or (cl-position keep-selected
@@ -1457,6 +1463,11 @@ indices."
       (if (or (not selectrum--match-required-p)
               (string-empty-p
                (minibuffer-contents))
+              (and (not selectrum--refined-candidates)
+                   minibuffer-history-position
+                   (not (zerop minibuffer-history-position))
+                   (member (minibuffer-contents)
+                           selectrum--preprocessed-candidates))
               (and index (>= index 0))
               (if minibuffer-completing-file-name
                   (selectrum--at-existing-prompt-path-p)
