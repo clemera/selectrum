@@ -723,7 +723,8 @@ the update."
     (goto-char (max (point) (minibuffer-prompt-end)))
     ;; Scroll the minibuffer when current prompt exceeds window width.
     (let* ((width (window-width)))
-      (when (> (point-max) width)
+      (if (< (point) width)
+          (set-window-hscroll nil 0)
         (set-window-hscroll nil (- (point) (/ width 4)))))
     ;; For some reason this resets and thus can't be set in setup hook.
     (setq-local truncate-lines t)
